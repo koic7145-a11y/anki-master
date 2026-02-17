@@ -17,6 +17,7 @@ class SupabaseSync {
         this.realtimeChannel = null;
         this.onSyncStatusChange = null;
         this.onDataChange = null;
+        this.onAuthChange = null;
         this._syncTimer = null;
         this._init();
     }
@@ -42,10 +43,12 @@ class SupabaseSync {
 
             if (event === 'SIGNED_IN') {
                 this._setSyncStatus('syncing');
+                if (this.onAuthChange) this.onAuthChange(true, this.user?.email);
                 this.fullSync().then(() => this.subscribeRealtime());
             } else if (event === 'SIGNED_OUT') {
                 this.unsubscribeRealtime();
                 this._setSyncStatus('offline');
+                if (this.onAuthChange) this.onAuthChange(false, null);
             }
         });
 

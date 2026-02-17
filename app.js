@@ -38,6 +38,12 @@ class MemoryApp {
     // --- Supabase Sync setup ---
     if (typeof syncModule !== 'undefined') {
       syncModule.onSyncStatusChange = (status) => this.updateSyncUI(status);
+      syncModule.onAuthChange = (loggedIn, email) => {
+        this.updateAuthUI(loggedIn, email);
+        if (loggedIn) {
+          this.updateSyncUI('syncing');
+        }
+      };
       syncModule.onDataChange = async () => {
         await this.loadData();
         await this.loadDecks();
@@ -48,6 +54,7 @@ class MemoryApp {
       const session = await syncModule.getSession();
       if (session) {
         this.updateAuthUI(true, syncModule.user.email);
+        this.updateSyncUI('syncing');
         syncModule.fullSync().then(() => syncModule.subscribeRealtime());
       }
     }
