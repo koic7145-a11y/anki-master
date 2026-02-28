@@ -88,7 +88,7 @@ class SupabaseSync {
 
     async signOut() {
         if (!this.client) return;
-        this.unsubscribeRealtime();
+        await this.unsubscribeRealtime();
         await this.client.auth.signOut();
         this.user = null;
         this._setSyncStatus('offline');
@@ -362,12 +362,12 @@ class SupabaseSync {
     }
 
     // ─── Realtime Subscription ───
-    subscribeRealtime() {
+    async subscribeRealtime() {
         if (!this.client || !this.user) return;
-        this.unsubscribeRealtime();
+        await this.unsubscribeRealtime();
 
         this.realtimeChannel = this.client
-            .channel('sync-changes')
+            .channel(`sync-changes-${this.user.id}`)
             .on('postgres_changes',
                 { event: '*', schema: 'public', table: 'cards', filter: `user_id=eq.${this.user.id}` },
                 (payload) => {
@@ -459,9 +459,9 @@ class SupabaseSync {
         }
     }
 
-    unsubscribeRealtime() {
+    async unsubscribeRealtime() {
         if (this.realtimeChannel) {
-            this.client.removeChannel(this.realtimeChannel);
+            await this.client.removeChannel(this.realtimeChannel);
             this.realtimeChannel = null;
         }
     }
