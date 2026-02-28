@@ -449,6 +449,8 @@ class MemoryApp {
             if (password !== confirm) {
               errEl.textContent = 'パスワードが一致しません';
               errEl.style.display = 'block';
+              authSubmitBtn.disabled = false;
+              authSubmitBtn.textContent = '新規登録';
               return;
             }
             result = await syncModule.signUp(email, password);
@@ -460,8 +462,16 @@ class MemoryApp {
             errEl.textContent = result.error.message;
             errEl.style.display = 'block';
           } else {
-            this.updateAuthUI(true, email);
-            this.showToast(mode === 'signup' ? 'アカウントを作成しました' : 'ログインしました');
+            if (mode === 'signup' && !result.data?.session) {
+              // メール確認が必要な設定の場合（セッションがまだない）
+              errEl.textContent = '確認メールを送信しました。メール内のリンクをクリックしてからログインしてください。';
+              errEl.style.color = '#22c55e';
+              errEl.style.display = 'block';
+              this.showToast('確認メールを送信しました');
+            } else {
+              this.updateAuthUI(true, email);
+              this.showToast(mode === 'signup' ? 'アカウントを作成しました' : 'ログインしました');
+            }
           }
         } catch (e) {
           errEl.textContent = 'エラーが発生しました';
