@@ -9,6 +9,8 @@ class MemoryApp {
     this.minEaseFactor = 1.3;
     this.cards = [];
     this.decks = [];
+    this.decks = [];
+
     this.currentReviewCards = [];
     this.currentCardIndex = 0;
     this.correctCount = 0;
@@ -30,7 +32,9 @@ class MemoryApp {
   async init() {
     await this.loadData();
     await this.loadDecks();
+
     this.initEvents();
+
     this.populateDeckSelect();
     this.restoreLastCategory();
     this.render();
@@ -47,6 +51,7 @@ class MemoryApp {
       syncModule.onDataChange = async () => {
         await this.loadData();
         await this.loadDecks();
+
         this.populateDeckSelect();
         this.render();
       };
@@ -113,6 +118,7 @@ class MemoryApp {
           this.decks.push(deck);
         }
       }
+
     } catch (e) {
       console.error('Failed to load decks:', e);
       this.decks = [];
@@ -125,6 +131,7 @@ class MemoryApp {
   }
 
   populateSelectElement(select, currentValue) {
+    // ... (unchanged)
     select.innerHTML = '<option value="">デッキを選択してください</option>';
 
     const groups = {
@@ -1442,6 +1449,260 @@ class MemoryApp {
     setTimeout(() => {
       toast.classList.remove('show');
     }, 3000);
+  }
+
+
+
+  async addNote(imageData, title, category) {
+    if (!imageData) {
+      this.showToast('画像を選択してください');
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    const note = {
+      id: this.generateId(),
+      title: title || '',
+      imageData: imageData,
+      category: category || '未分類',
+      createdAt: now,
+      updatedAt: now,
+      synced: 0,
+      deleted: 0
+    };
+
+    try {
+      await db.notes.add(note);
+      this.notes.unshift(note); // Add to beginning
+
+      if (typeof syncModule !== 'undefined') syncModule.markNoteDirty(note.id);
+
+      this.showToast('画像メモを保存しました');
+      this.renderNotes();
+      return true;
+    } catch (e) {
+      console.error('Failed to add note:', e);
+      this.showToast('エラー: メモの保存に失敗しました');
+      return false;
+    }
+  }
+
+  async deleteNote(id) {
+    if (!confirm('この画像メモを削除してもよろしいですか？')) return;
+
+    try {
+      const note = await db.notes.get(id);
+      if (note) {
+        await db.notes.update(id, {
+          deleted: 1,
+          updatedAt: new Date().toISOString(),
+          synced: 0
+        });
+
+        if (typeof syncModule !== 'undefined') syncModule.markNoteDirty(id);
+
+        this.notes = this.notes.filter(n => n.id !== id);
+        this.renderNotes();
+        this.showToast('画像メモを削除しました');
+      }
+    } catch (e) {
+      console.error('Failed to delete note:', e);
+      this.showToast('削除に失敗しました');
+    }
+  }
+
+  renderNotes() {
+    const container = document.getElementById('notesGrid');
+    if (!container) return;
+
+    if (this.notes.length === 0) {
+      container.innerHTML = '<div class="empty-state">画像メモがありません</div>';
+      return;
+    }
+
+    container.innerHTML = this.notes.map(note => `
+      <div class="note-item" onclick="app.openNoteViewer('${note.id}')">
+        <img src="${note.imageData}" alt="${this.escapeHtml(note.title)}" loading="lazy">
+        ${note.title ? `<div class="note-title-overlay">${this.escapeHtml(note.title)}</div>` : ''}
+        <button class="note-delete-btn" onclick="event.stopPropagation(); app.deleteNote('${note.id}')">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    `).join('');
+  }
+
+  openNoteViewer(id) {
+    const note = this.notes.find(n => n.id === id);
+    if (!note) return;
+
+    const modal = document.getElementById('imageModal');
+    const img = document.getElementById('imageModalImg');
+    const caption = document.getElementById('imageModalCaption');
+
+    img.src = note.imageData;
+    caption.textContent = note.title || '';
+    modal.classList.add('active');
+  }
+
+  closeNoteViewer() {
+    const modal = document.getElementById('imageModal');
+    modal.classList.remove('active');
+  }
+
+  initNoteEvents() {
+    // Note Upload
+    const uploadBox = document.getElementById('noteUploadBox');
+    const fileInput = document.getElementById('noteFileInput');
+    const preview = document.getElementById('noteUploadPreview');
+    const previewImg = document.getElementById('notePreviewImage');
+    const removeBtn = document.getElementById('noteRemovePreviewBtn');
+    const addBtn = document.getElementById('addNoteBtn');
+    const titleInput = document.getElementById('noteTitleInput');
+    const categorySelect = document.getElementById('noteCategorySelect');
+
+    let currentNoteImage = null;
+
+    if (uploadBox && fileInput) {
+      uploadBox.addEventListener('click', () => fileInput.click());
+      uploadBox.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      // Drag & Drop
+      uploadBox.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadBox.classList.add('note-dragover');
+      });
+      uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('note-dragover'));
+      uploadBox.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadBox.classList.remove('note-dragover');
+        if (e.dataTransfer.files.length > 0) {
+          handleNoteFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          handleNoteFile(e.target.files[0]);
+        }
+      });
+    }
+
+    if (removeBtn) {
+      removeBtn.addEventListener('click', () => {
+        currentNoteImage = null;
+        preview.classList.add('hidden');
+        uploadBox.classList.remove('hidden');
+        fileInput.value = '';
+        addBtn.disabled = true;
+      });
+    }
+
+    if (addBtn) {
+      addBtn.addEventListener('click', async () => {
+        const title = titleInput.value.trim();
+        const category = categorySelect.value;
+
+        const success = await this.addNote(currentNoteImage, title, category);
+        if (success) {
+          // Reset form
+          currentNoteImage = null;
+          preview.classList.add('hidden');
+          uploadBox.classList.remove('hidden');
+          fileInput.value = '';
+          titleInput.value = '';
+          addBtn.disabled = true;
+        }
+      });
+    }
+
+    const handleNoteFile = (file) => {
+      if (!file.type.startsWith('image/')) {
+        this.showToast('画像ファイルを選択してください');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width;
+          let h = img.height;
+
+          // Resize logic (same as main app but slightly larger for notes)
+          if (w > 1200 || h > 1200) {
+            if (w > h) {
+              h = Math.round(h * 1200 / w);
+              w = 1200;
+            } else {
+              w = Math.round(w * 1200 / h);
+              h = 1200;
+            }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+          currentNoteImage = dataUrl;
+          previewImg.src = dataUrl;
+          preview.classList.remove('hidden');
+          uploadBox.classList.add('hidden');
+          addBtn.disabled = false;
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    // Modal Events
+    const modalClose = document.getElementById('imageModalClose');
+    if (modalClose) modalClose.addEventListener('click', () => this.closeNoteViewer());
+
+    document.getElementById('imageModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'imageModal') this.closeNoteViewer();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.getElementById('imageModal').classList.contains('active')) {
+        this.closeNoteViewer();
+      }
+    });
+
+    // Update categories on deck change
+    // This is handled via updateNoteCategorySelect called in loadNotes / createDeck / deleteDeck etc.
+  }
+
+  updateNoteCategorySelect() {
+    const select = document.getElementById('noteCategorySelect');
+    if (!select) return;
+
+    // Save current selection
+    const current = select.value;
+
+    // Clear (except default)
+    select.innerHTML = '<option value="">カテゴリなし</option>';
+
+    // Add active decks
+    this.decks
+      .filter(d => !d.deleted)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+      .forEach(deck => {
+        const option = document.createElement('option');
+        option.value = deck.name;
+        option.textContent = deck.name;
+        select.appendChild(option);
+      });
+
+    // Restore selection if possible
+    if (current) select.value = current;
   }
 }
 

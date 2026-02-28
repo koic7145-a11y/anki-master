@@ -147,6 +147,7 @@ class SupabaseSync {
     async pushChanges() {
         if (!this.client || !this.user) return;
 
+        // --- Cards Push ---
         const unsyncedCards = await db.cards
             .where('synced').equals(0)
             .toArray();
@@ -159,10 +160,14 @@ class SupabaseSync {
 
                 if (card.questionImage && card.questionImage.startsWith('data:')) {
                     qPath = await this.uploadImage(card.questionImage);
+                } else if (card.questionImage && card.questionImage.includes('/card-images/')) {
+                    qPath = card.questionImage.split('/card-images/')[1];
                 }
 
                 if (card.answerImage && card.answerImage.startsWith('data:')) {
                     aPath = await this.uploadImage(card.answerImage);
+                } else if (card.answerImage && card.answerImage.includes('/card-images/')) {
+                    aPath = card.answerImage.split('/card-images/')[1];
                 }
 
                 rows.push({
@@ -198,6 +203,7 @@ class SupabaseSync {
             }
         }
 
+        // --- Decks Push ---
         const unsyncedDecks = await db.decks
             .where('synced').equals(0)
             .toArray();
@@ -225,12 +231,16 @@ class SupabaseSync {
                 console.log(`[Sync] Pushed ${ids.length} decks`);
             }
         }
+
+
     }
 
+    // ─── Pull: Supabase → Local ───
     // ─── Pull: Supabase → Local ───
     async pullChanges() {
         if (!this.client || !this.user) return;
 
+        // --- Cards Pull ---
         const { data: remoteCards, error: cardsError } = await this.client
             .from('cards')
             .select('*')
@@ -238,71 +248,72 @@ class SupabaseSync {
 
         if (cardsError) {
             console.error('[Sync] Pull cards failed:', cardsError);
-            return;
-        }
+        } else {
+            let changed = false;
+            for (const rc of remoteCards || []) {
+                const localCard = await db.cards.get(rc.id);
 
-        let changed = false;
-        for (const rc of remoteCards || []) {
-            const localCard = await db.cards.get(rc.id);
-
-            let qImg = '';
-            if (rc.question_image_path) {
-                const { data } = this.client.storage.from('card-images').getPublicUrl(rc.question_image_path);
-                qImg = data.publicUrl;
-            }
-            let aImg = '';
-            if (rc.answer_image_path) {
-                const { data } = this.client.storage.from('card-images').getPublicUrl(rc.answer_image_path);
-                aImg = data.publicUrl;
-            }
-
-            if (!qImg && localCard && localCard.questionImage && localCard.questionImage.startsWith('data:')) {
-                qImg = localCard.questionImage;
-            }
-            if (!aImg && localCard && localCard.answerImage && localCard.answerImage.startsWith('data:')) {
-                aImg = localCard.answerImage;
-            }
-
-            const remoteCard = {
-                id: rc.id,
-                question: rc.question || '',
-                answer: rc.answer || '',
-                questionImage: qImg,
-                answerImage: aImg,
-                category: rc.category || '未分類',
-                level: rc.level || 0,
-                easeFactor: rc.ease_factor || 2.5,
-                interval: rc.interval_days || 0,
-                repetitions: rc.repetitions || 0,
-                nextReview: rc.next_review || '',
-                reviewHistory: typeof rc.review_history === 'string'
-                    ? JSON.parse(rc.review_history) : (rc.review_history || []),
-                createdAt: rc.created_at,
-                updatedAt: rc.updated_at,
-                deleted: rc.deleted ? 1 : 0,
-                synced: 1
-            };
-
-            if (!localCard) {
-                if (!rc.deleted) {
-                    await db.cards.add(remoteCard);
-                    changed = true;
+                let qImg = '';
+                if (rc.question_image_path) {
+                    const { data } = this.client.storage.from('card-images').getPublicUrl(rc.question_image_path);
+                    qImg = data.publicUrl;
                 }
-            } else {
-                const remoteTime = new Date(rc.updated_at).getTime();
-                const localTime = new Date(localCard.updatedAt || 0).getTime();
+                let aImg = '';
+                if (rc.answer_image_path) {
+                    const { data } = this.client.storage.from('card-images').getPublicUrl(rc.answer_image_path);
+                    aImg = data.publicUrl;
+                }
 
-                if (remoteTime > localTime) {
-                    if (rc.deleted) {
-                        await db.cards.delete(rc.id);
-                    } else {
-                        await db.cards.put(remoteCard);
+                if (!qImg && localCard && localCard.questionImage && localCard.questionImage.startsWith('data:')) {
+                    qImg = localCard.questionImage;
+                }
+                if (!aImg && localCard && localCard.answerImage && localCard.answerImage.startsWith('data:')) {
+                    aImg = localCard.answerImage;
+                }
+
+                const remoteCard = {
+                    id: rc.id,
+                    question: rc.question || '',
+                    answer: rc.answer || '',
+                    questionImage: qImg,
+                    answerImage: aImg,
+                    category: rc.category || '未分類',
+                    level: rc.level || 0,
+                    easeFactor: rc.ease_factor || 2.5,
+                    interval: rc.interval_days || 0,
+                    repetitions: rc.repetitions || 0,
+                    nextReview: rc.next_review || '',
+                    reviewHistory: typeof rc.review_history === 'string'
+                        ? JSON.parse(rc.review_history) : (rc.review_history || []),
+                    createdAt: rc.created_at,
+                    updatedAt: rc.updated_at,
+                    deleted: rc.deleted ? 1 : 0,
+                    synced: 1
+                };
+
+                if (!localCard) {
+                    if (!rc.deleted) {
+                        await db.cards.add(remoteCard);
+                        changed = true;
                     }
-                    changed = true;
+                } else {
+                    const remoteTime = new Date(rc.updated_at).getTime();
+                    const localTime = new Date(localCard.updatedAt || 0).getTime();
+
+                    if (remoteTime > localTime) {
+                        if (rc.deleted) {
+                            await db.cards.delete(rc.id);
+                        } else {
+                            await db.cards.put(remoteCard);
+                        }
+                        changed = true;
+                    }
                 }
             }
+            if (changed && this.onDataChange) this.onDataChange();
         }
 
+        // --- Decks Pull ---
         const { data: remoteDecks, error: decksError } = await this.client
             .from('decks')
             .select('*')
@@ -310,45 +321,44 @@ class SupabaseSync {
 
         if (decksError) {
             console.error('[Sync] Pull decks failed:', decksError);
-            return;
-        }
+        } else {
+            let changed = false;
+            for (const rd of remoteDecks || []) {
+                const localDeck = await db.decks.get(rd.id);
 
-        for (const rd of remoteDecks || []) {
-            const localDeck = await db.decks.get(rd.id);
+                const remoteDeck = {
+                    id: rd.id,
+                    name: rd.name,
+                    group: rd.group_name || '',
+                    createdAt: rd.created_at,
+                    updatedAt: rd.updated_at,
+                    deleted: rd.deleted ? 1 : 0,
+                    synced: 1
+                };
 
-            const remoteDeck = {
-                id: rd.id,
-                name: rd.name,
-                group: rd.group_name || '',
-                createdAt: rd.created_at,
-                updatedAt: rd.updated_at,
-                deleted: rd.deleted ? 1 : 0,
-                synced: 1
-            };
-
-            if (!localDeck) {
-                if (!rd.deleted) {
-                    await db.decks.add(remoteDeck);
-                    changed = true;
-                }
-            } else {
-                const remoteTime = new Date(rd.updated_at).getTime();
-                const localTime = new Date(localDeck.updatedAt || 0).getTime();
-
-                if (remoteTime > localTime) {
-                    if (rd.deleted) {
-                        await db.decks.delete(rd.id);
-                    } else {
-                        await db.decks.put(remoteDeck);
+                if (!localDeck) {
+                    if (!rd.deleted) {
+                        await db.decks.add(remoteDeck);
+                        changed = true;
                     }
-                    changed = true;
+                } else {
+                    const remoteTime = new Date(rd.updated_at).getTime();
+                    const localTime = new Date(localDeck.updatedAt || 0).getTime();
+
+                    if (remoteTime > localTime) {
+                        if (rd.deleted) {
+                            await db.decks.delete(rd.id);
+                        } else {
+                            await db.decks.put(remoteDeck);
+                        }
+                        changed = true;
+                    }
                 }
             }
+            if (changed && this.onDataChange) this.onDataChange();
         }
 
-        if (changed && this.onDataChange) {
-            this.onDataChange();
-        }
+
     }
 
     // ─── Realtime Subscription ───
@@ -372,6 +382,7 @@ class SupabaseSync {
                     this._handleRealtimeChange('decks', payload);
                 }
             )
+
             .subscribe((status) => {
                 console.log('[Realtime] subscription status:', status);
             });
@@ -440,45 +451,42 @@ class SupabaseSync {
                 };
                 await db.decks.put(deck);
             }
+
+
+            if (this.onDataChange) {
+                this.onDataChange();
+            }
         }
 
-        if (this.onDataChange) {
-            this.onDataChange();
+        unsubscribeRealtime() {
+            if (this.realtimeChannel) {
+                this.client.removeChannel(this.realtimeChannel);
+                this.realtimeChannel = null;
+            }
         }
-    }
-
-    unsubscribeRealtime() {
-        if (this.realtimeChannel) {
-            this.client.removeChannel(this.realtimeChannel);
-            this.realtimeChannel = null;
-        }
-    }
 
     async markCardDirty(cardId) {
-        await db.cards.update(cardId, {
-            updatedAt: new Date().toISOString(),
-            synced: 0
-        });
-        this._debouncedSync();
-    }
+            await db.cards.update(cardId, {
+                updatedAt: new Date().toISOString(),
+                synced: 0
+            });
+            this._debouncedSync();
+        }
 
     async markDeckDirty(deckId) {
-        await db.decks.update(deckId, {
-            updatedAt: new Date().toISOString(),
-            synced: 0
-        });
-        this._debouncedSync();
-    }
+            await db.decks.update(deckId, {
+                updatedAt: new Date().toISOString(),
+                synced: 0
+            });
+            this._debouncedSync();
+        }
 
-    _debouncedSync() {
-        if (this._syncTimer) clearTimeout(this._syncTimer);
-        this._syncTimer = setTimeout(() => {
-            if (this.user && navigator.onLine) {
-                this.pushChanges().then(() => this._setSyncStatus('synced'));
-            }
-        }, 2000);
+        _debouncedSync() {
+            if (this._syncTimer) clearTimeout(this._syncTimer);
+            this._syncTimer = setTimeout(() => {
+                if (this.user && navigator.onLine) {
+                    this.pushChanges().then(() => this._setSyncStatus('synced'));
+                }
+            }, 2000);
+        }
     }
-}
-
-// Global instance
-const syncModule = new SupabaseSync();

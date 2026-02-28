@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anki-master-v9';
+const CACHE_NAME = 'anki-master-v11-rollback';
 const ASSETS = [
     './',
     './index.html',
