@@ -457,36 +457,39 @@ class SupabaseSync {
                 this.onDataChange();
             }
         }
+    }
 
-        unsubscribeRealtime() {
-            if (this.realtimeChannel) {
-                this.client.removeChannel(this.realtimeChannel);
-                this.realtimeChannel = null;
-            }
-        }
-
-    async markCardDirty(cardId) {
-            await db.cards.update(cardId, {
-                updatedAt: new Date().toISOString(),
-                synced: 0
-            });
-            this._debouncedSync();
-        }
-
-    async markDeckDirty(deckId) {
-            await db.decks.update(deckId, {
-                updatedAt: new Date().toISOString(),
-                synced: 0
-            });
-            this._debouncedSync();
-        }
-
-        _debouncedSync() {
-            if (this._syncTimer) clearTimeout(this._syncTimer);
-            this._syncTimer = setTimeout(() => {
-                if (this.user && navigator.onLine) {
-                    this.pushChanges().then(() => this._setSyncStatus('synced'));
-                }
-            }, 2000);
+    unsubscribeRealtime() {
+        if (this.realtimeChannel) {
+            this.client.removeChannel(this.realtimeChannel);
+            this.realtimeChannel = null;
         }
     }
+
+    async markCardDirty(cardId) {
+        await db.cards.update(cardId, {
+            updatedAt: new Date().toISOString(),
+            synced: 0
+        });
+        this._debouncedSync();
+    }
+
+    async markDeckDirty(deckId) {
+        await db.decks.update(deckId, {
+            updatedAt: new Date().toISOString(),
+            synced: 0
+        });
+        this._debouncedSync();
+    }
+
+    _debouncedSync() {
+        if (this._syncTimer) clearTimeout(this._syncTimer);
+        this._syncTimer = setTimeout(() => {
+            if (this.user && navigator.onLine) {
+                this.pushChanges().then(() => this._setSyncStatus('synced'));
+            }
+        }, 2000);
+    }
+}
+
+const syncModule = new SupabaseSync();
